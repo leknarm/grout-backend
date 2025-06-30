@@ -1,0 +1,48 @@
+# กำหนด Stages หรือลำดับขั้นตอนของ Pipeline ทั้งหมด
+# ในที่นี้เรามีแค่ stage เดียวคือ 'build'
+stages:
+  - build
+
+# --- ชื่องาน (Job) ที่จะทำใน Pipeline ---
+# คุณสามารถตั้งชื่อ Job ได้ตามใจชอบ ในที่นี้เราตั้งว่า build_and_push_image
+build_and_push_image:
+  # 1. ระบุว่า Job นี้อยู่ใน Stage ไหน
+  stage: build
+
+  # 2. ระบุว่าจะใช้ Docker Image อะไรในการรัน Job นี้
+  # เราต้องใช้ image ที่มีคำสั่ง Docker ติดตั้งอยู่แล้ว
+  image: docker:20.10.16
+
+  # 3. ระบุ Service ที่จำเป็นสำหรับ Job นี้
+  # docker:dind (Docker-in-Docker) ทำให้เราสามารถรันคำสั่ง docker build ภายใน Runner ได้
+  services:
+    - docker:20.10.16-dind
+
+  # 4. ส่วนของคำสั่งที่จะรันก่อน Script หลัก (มักใช้สำหรับ Login)
+  before_script:
+    - echo "Logging into GitLab Container Registry..."
+    # ใช้ตัวแปรที่ GitLab เตรียมไว้ให้ (CI_REGISTRY_USER, CI_REGISTRY_PASSWORD, CI_REGISTRY)
+    # เพื่อ login เข้าไปยัง Container Registry ของโปรเจกต์อย่างปลอดภัย
+    # คุณไม่ต้องสร้างตัวแปรเหล่านี้เอง GitLab จัดการให้หมด!
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+  # 5. ส่วนของคำสั่งหลักที่จะให้ Runner ทำงาน
+  script:
+    - echo "Building Docker image..."
+    # สร้าง Tag ให้กับ Image โดยใช้ชื่อ Branch และรหัส Commit เพื่อให้ไม่ซ้ำกัน
+    # ตัวอย่าง Tag: registry.gitlab.com/your-name/your-project:main-a1b2c3d4
+    - docker build -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA" .
+
+    - echo "Pushing Docker image to GitLab Container Registry..."
+    # Push image ที่มี Tag นั้นขึ้นไปเก็บที่ Registry
+    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA"
+
+    - echo "Also creating a 'latest' tag..."
+    # สร้าง tag 'latest' เพื่อให้ดึงไปใช้ง่ายๆ (เป็น Optional)
+    - docker tag "$CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA" "$CI_REGISTRY_IMAGE:latest"
+    - docker push "$CI_REGISTRY_IMAGE:latest"
+
+  # 6. (Optional) ระบุว่า Job นี้จะรันเมื่อไหร่
+  # ในที่นี้คือรันเฉพาะเมื่อมีการ push code เข้า branch 'main' เท่านั้น
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "feature/devops"'
